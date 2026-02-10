@@ -6,6 +6,23 @@ interface UserInfo {
   username?: string;
   name?: string;
   profilePicUrl?: string;
+  plan?: string;
+  threadsConnected?: boolean;
+}
+
+interface AlertItem {
+  id: string;
+  type: string;
+  isActive: boolean;
+  lastTriggered: string | null;
+  triggerCount: number;
+}
+
+interface ScheduledItem {
+  id: string;
+  text: string;
+  scheduledFor: string;
+  status: string;
 }
 
 interface DashboardStats {
@@ -22,6 +39,8 @@ export default function App() {
   const [apiKeyInput, setApiKeyInput] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [user, setUser] = useState<UserInfo | null>(null);
+  const [alerts, setAlerts] = useState<AlertItem[]>([]);
+  const [scheduled, setScheduled] = useState<ScheduledItem[]>([]);
   const [stats, setStats] = useState<DashboardStats>({
     postsToday: 0,
     totalLikes: 0,
@@ -50,24 +69,38 @@ export default function App() {
 
   async function loadDashboard() {
     try {
-      const [me, notifications, scheduled] = await Promise.allSettled([
+      const [me, notifications, scheduledRes] = await Promise.allSettled([
         api.getMe(),
         api.getNotifications(),
         api.getScheduled(),
       ]);
 
       if (me.status === 'fulfilled') {
-        setUser(me.value as UserInfo);
+        const data = me.value as {
+          user?: { id?: string; email?: string; name?: string; plan?: string };
+          threadsConnection?: { username?: string; profilePictureUrl?: string };
+        };
+        setUser({
+          username: data.threadsConnection?.username,
+          name: data.user?.name,
+          profilePicUrl: data.threadsConnection?.profilePictureUrl,
+          plan: data.user?.plan,
+          threadsConnected: !!data.threadsConnection,
+        });
       }
 
       if (notifications.status === 'fulfilled') {
-        const notifs = notifications.value as { count?: number };
-        setStats((prev) => ({ ...prev, alertCount: notifs.count ?? 0 }));
+        const data = notifications.value as { alerts?: AlertItem[] };
+        const alertList = data.alerts ?? [];
+        setAlerts(alertList);
+        setStats((prev) => ({ ...prev, alertCount: alertList.length }));
       }
 
-      if (scheduled.status === 'fulfilled') {
-        const sched = scheduled.value as { count?: number };
-        setStats((prev) => ({ ...prev, scheduledCount: sched.count ?? 0 }));
+      if (scheduledRes.status === 'fulfilled') {
+        const data = scheduledRes.value as { posts?: ScheduledItem[] };
+        const postList = data.posts ?? [];
+        setScheduled(postList);
+        setStats((prev) => ({ ...prev, scheduledCount: postList.length }));
       }
     } catch {
       // Dashboard data unavailable
@@ -180,28 +213,23 @@ export default function App() {
             )}
           </div>
         </div>
-        <button
-          onClick={openDashboard}
-          className="text-xs text-blue-500 hover:underline"
-        >
-          Open Dashboard
-        </button>
+        <div className="flex items-center gap-2">
+          {user?.plan && (
+            <span className="text-xs font-medium text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">
+              {user.plan}
+            </span>
+          )}
+          <button
+            onClick={openDashboard}
+            className="text-xs text-blue-500 hover:underline"
+          >
+            Dashboard
+          </button>
+        </div>
       </div>
 
       {/* Stats Grid */}
       <div className="grid grid-cols-2 gap-3 mb-4">
-        <div className="bg-white rounded-lg p-3 border border-gray-200">
-          <p className="text-xs text-gray-500">Posts Today</p>
-          <p className="text-xl font-semibold text-gray-900">{stats.postsToday}</p>
-        </div>
-        <div className="bg-white rounded-lg p-3 border border-gray-200">
-          <p className="text-xs text-gray-500">Total Likes</p>
-          <p className="text-xl font-semibold text-gray-900">{stats.totalLikes}</p>
-        </div>
-        <div className="bg-white rounded-lg p-3 border border-gray-200">
-          <p className="text-xs text-gray-500">Total Replies</p>
-          <p className="text-xl font-semibold text-gray-900">{stats.totalReplies}</p>
-        </div>
         <div className="bg-white rounded-lg p-3 border border-gray-200">
           <p className="text-xs text-gray-500">Alerts</p>
           <p className="text-xl font-semibold text-gray-900">
@@ -211,15 +239,56 @@ export default function App() {
             )}
           </p>
         </div>
-      </div>
-
-      {/* Scheduled Posts */}
-      <div className="bg-white rounded-lg p-3 border border-gray-200 mb-4">
-        <div className="flex items-center justify-between">
-          <p className="text-xs text-gray-500">Scheduled Posts</p>
-          <span className="text-xs font-medium text-blue-500">{stats.scheduledCount} upcoming</span>
+        <div className="bg-white rounded-lg p-3 border border-gray-200">
+          <p className="text-xs text-gray-500">Scheduled</p>
+          <p className="text-xl font-semibold text-gray-900">{stats.scheduledCount}</p>
         </div>
       </div>
+
+      {/* Scheduled Posts List */}
+      {scheduled.length > 0 && (
+        <div className="bg-white rounded-lg border border-gray-200 mb-4">
+          <div className="px-3 py-2 border-b border-gray-100">
+            <p className="text-xs font-semibold text-gray-700">Upcoming Posts</p>
+          </div>
+          <div className="divide-y divide-gray-100">
+            {scheduled.slice(0, 3).map((post) => (
+              <div key={post.id} className="px-3 py-2">
+                <p className="text-xs text-gray-800 truncate">{post.text}</p>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  {new Date(post.scheduledFor).toLocaleString(undefined, {
+                    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+                  })}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Recent Alerts */}
+      {alerts.length > 0 && (
+        <div className="bg-white rounded-lg border border-gray-200 mb-4">
+          <div className="px-3 py-2 border-b border-gray-100">
+            <p className="text-xs font-semibold text-gray-700">Recent Alerts</p>
+          </div>
+          <div className="divide-y divide-gray-100">
+            {alerts.slice(0, 3).map((alert) => (
+              <div key={alert.id} className="px-3 py-2 flex items-center justify-between">
+                <div>
+                  <p className="text-xs text-gray-800">{alert.type.replace(/_/g, ' ')}</p>
+                  {alert.lastTriggered && (
+                    <p className="text-xs text-gray-400">
+                      {new Date(alert.lastTriggered).toLocaleDateString()}
+                    </p>
+                  )}
+                </div>
+                <span className="text-xs text-gray-400">{alert.triggerCount}x</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Quick Actions */}
       <div className="space-y-2">

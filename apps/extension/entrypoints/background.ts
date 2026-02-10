@@ -19,6 +19,34 @@ export default defineBackground(() => {
       return true;
     }
   });
+
+  // ==================== Alarm-based Polling ====================
+
+  // Create alarm for periodic alert checks
+  browser.alarms.create('check-alerts', { periodInMinutes: 5 });
+
+  browser.alarms.onAlarm.addListener(async (alarm) => {
+    if (alarm.name === 'check-alerts') {
+      try {
+        const { apiKey } = await browser.storage.local.get('apiKey');
+        if (!apiKey) return;
+
+        const data = await handleApiRequest('/notifications');
+        const alerts = (data as { alerts?: Array<{ id: string }> })?.alerts ?? [];
+        const count = alerts.length;
+
+        if (count > 0) {
+          await browser.action.setBadgeText({ text: String(count) });
+          await browser.action.setBadgeBackgroundColor({ color: '#ef4444' });
+        } else {
+          await browser.action.setBadgeText({ text: '' });
+        }
+      } catch {
+        // Polling failed, clear badge
+        await browser.action.setBadgeText({ text: '' });
+      }
+    }
+  });
 });
 
 async function handleApiRequest(
