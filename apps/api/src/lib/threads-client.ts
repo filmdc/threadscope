@@ -471,7 +471,6 @@ export class ThreadsApiClient {
     await this.rateLimiter.waitForSlot();
 
     const url = new URL(`${this.baseUrl}${endpoint}`);
-    url.searchParams.set('access_token', this.accessToken);
 
     if (params) {
       for (const [key, value] of Object.entries(params)) {
@@ -489,6 +488,7 @@ export class ThreadsApiClient {
           method,
           headers: {
             'Content-Type': 'application/json',
+            'Authorization': `Bearer ${this.accessToken}`,
           },
         };
 

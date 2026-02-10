@@ -4,6 +4,9 @@ const allowedOrigins = (process.env.CORS_ORIGINS ?? 'http://localhost:3000')
   .split(',')
   .map((o) => o.trim());
 
+// Only allow a specific extension ID, not all Chrome extensions
+const allowedExtensionId = process.env.EXTENSION_ID;
+
 export const corsMiddleware = cors({
   origin: (origin, callback) => {
     // Allow requests with no origin (mobile apps, curl, etc.)
@@ -12,8 +15,11 @@ export const corsMiddleware = cors({
       return;
     }
 
-    // Allow Chrome extension origins
-    if (origin.startsWith('chrome-extension://')) {
+    // Allow specific Chrome extension origin only
+    if (
+      allowedExtensionId &&
+      origin === `chrome-extension://${allowedExtensionId}`
+    ) {
       callback(null, true);
       return;
     }

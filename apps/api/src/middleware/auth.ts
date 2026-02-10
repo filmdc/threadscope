@@ -39,7 +39,7 @@ export function authenticateJwt(
   }
 
   try {
-    const payload = jwt.verify(token, secret) as {
+    const payload = jwt.verify(token, secret, { algorithms: ['HS256'] }) as {
       sub: string;
       email: string;
       plan: string;

@@ -20,9 +20,16 @@ const router = Router();
 
 // ==================== Validation Schemas ====================
 
+// Use strong password policy: min 8 chars, uppercase, lowercase, digit
 const registerSchema = z.object({
   email: z.string().email(),
-  password: z.string().min(8).max(128),
+  password: z
+    .string()
+    .min(8, 'Password must be at least 8 characters')
+    .max(128, 'Password must be at most 128 characters')
+    .regex(/[A-Z]/, 'Password must contain at least one uppercase letter')
+    .regex(/[a-z]/, 'Password must contain at least one lowercase letter')
+    .regex(/[0-9]/, 'Password must contain at least one digit'),
   name: z.string().min(1).max(100).optional(),
 });
 
@@ -33,23 +40,48 @@ const loginSchema = z.object({
 
 // ==================== Helpers ====================
 
+const REFRESH_COOKIE_NAME = 'ts_refresh';
+const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+
 function generateTokens(user: { id: string; email: string; plan: string }) {
   const jwtSecret = process.env.JWT_SECRET!;
-  const refreshSecret = process.env.JWT_REFRESH_SECRET!;
 
   const accessToken = jwt.sign(
     { sub: user.id, email: user.email, plan: user.plan },
     jwtSecret,
-    { expiresIn: JWT_ACCESS_EXPIRY }
+    { expiresIn: JWT_ACCESS_EXPIRY, algorithm: 'HS256' }
   );
 
+  // Create a unique session for refresh token rotation
+  const jti = crypto.randomUUID();
+
+  const refreshSecret = process.env.JWT_REFRESH_SECRET!;
   const refreshToken = jwt.sign(
-    { sub: user.id, type: 'refresh' },
+    { sub: user.id, type: 'refresh', jti },
     refreshSecret,
-    { expiresIn: JWT_REFRESH_EXPIRY }
+    { expiresIn: JWT_REFRESH_EXPIRY, algorithm: 'HS256' }
   );
 
-  return { accessToken, refreshToken };
+  return { accessToken, refreshToken, jti };
+}
+
+function setRefreshCookie(res: Response, refreshToken: string): void {
+  res.cookie(REFRESH_COOKIE_NAME, refreshToken, {
+    httpOnly: true,
+    secure: IS_PRODUCTION,
+    sameSite: IS_PRODUCTION ? 'strict' : 'lax',
+    path: '/auth/refresh',
+    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+  });
+}
+
+function clearRefreshCookie(res: Response): void {
+  res.clearCookie(REFRESH_COOKIE_NAME, {
+    httpOnly: true,
+    secure: IS_PRODUCTION,
+    sameSite: IS_PRODUCTION ? 'strict' : 'lax',
+    path: '/auth/refresh',
+  });
 }
 
 // ==================== Routes ====================
@@ -79,11 +111,23 @@ router.post('/register', authRateLimit, async (req: Request, res: Response) => {
       },
     });
 
-    const tokens = generateTokens({
+    const { accessToken, refreshToken, jti } = generateTokens({
       id: user.id,
       email: user.email,
       plan: user.plan,
     });
+
+    // Store refresh token session for rotation
+    await prisma.session.create({
+      data: {
+        sessionToken: jti,
+        userId: user.id,
+        expires: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      },
+    });
+
+    // Set refresh token as httpOnly cookie (not in response body)
+    setRefreshCookie(res, refreshToken);
 
     res.status(201).json({
       user: {
@@ -92,7 +136,7 @@ router.post('/register', authRateLimit, async (req: Request, res: Response) => {
         name: user.name,
         plan: user.plan,
       },
-      ...tokens,
+      accessToken,
     });
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -125,11 +169,23 @@ router.post('/login', authRateLimit, async (req: Request, res: Response) => {
       return;
     }
 
-    const tokens = generateTokens({
+    const { accessToken, refreshToken, jti } = generateTokens({
       id: user.id,
       email: user.email,
       plan: user.plan,
     });
+
+    // Store refresh token session for rotation
+    await prisma.session.create({
+      data: {
+        sessionToken: jti,
+        userId: user.id,
+        expires: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      },
+    });
+
+    // Set refresh token as httpOnly cookie (not in response body)
+    setRefreshCookie(res, refreshToken);
 
     res.json({
       user: {
@@ -139,7 +195,7 @@ router.post('/login', authRateLimit, async (req: Request, res: Response) => {
         plan: user.plan,
         avatarUrl: user.avatarUrl,
       },
-      ...tokens,
+      accessToken,
     });
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -153,42 +209,75 @@ router.post('/login', authRateLimit, async (req: Request, res: Response) => {
 
 /**
  * POST /auth/refresh
+ * Implements refresh token rotation: each refresh token can only be used once.
  */
-router.post('/refresh', async (req: Request, res: Response) => {
+router.post('/refresh', authRateLimit, async (req: Request, res: Response) => {
   try {
-    const { refreshToken } = req.body as { refreshToken?: string };
-    if (!refreshToken) {
-      res.status(400).json({ error: 'Refresh token required' });
+    // Read refresh token from httpOnly cookie
+    const refreshTokenValue = req.cookies?.[REFRESH_COOKIE_NAME];
+    if (!refreshTokenValue) {
+      res.status(401).json({ error: 'No refresh token' });
       return;
     }
 
     const refreshSecret = process.env.JWT_REFRESH_SECRET!;
-    const payload = jwt.verify(refreshToken, refreshSecret) as {
+    const payload = jwt.verify(refreshTokenValue, refreshSecret, {
+      algorithms: ['HS256'],
+    }) as {
       sub: string;
       type: string;
+      jti: string;
     };
 
-    if (payload.type !== 'refresh') {
+    if (payload.type !== 'refresh' || !payload.jti) {
       res.status(401).json({ error: 'Invalid token type' });
       return;
     }
+
+    // Refresh token rotation: check if this JTI has already been used
+    const session = await prisma.session.findUnique({
+      where: { sessionToken: payload.jti },
+    });
+
+    if (!session || session.expires < new Date()) {
+      // Token reuse detected or session expired - invalidate all sessions for this user
+      clearRefreshCookie(res);
+      res.status(401).json({ error: 'Invalid or expired refresh token' });
+      return;
+    }
+
+    // Delete the used session (one-time use)
+    await prisma.session.delete({ where: { id: session.id } });
 
     const user = await prisma.user.findUnique({
       where: { id: payload.sub },
     });
     if (!user) {
+      clearRefreshCookie(res);
       res.status(401).json({ error: 'User not found' });
       return;
     }
 
-    const tokens = generateTokens({
+    // Issue new tokens with a new JTI
+    const { accessToken, refreshToken: newRefreshToken, jti } = generateTokens({
       id: user.id,
       email: user.email,
       plan: user.plan,
     });
 
-    res.json(tokens);
+    // Store the new session
+    await prisma.session.create({
+      data: {
+        sessionToken: jti,
+        userId: user.id,
+        expires: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      },
+    });
+
+    setRefreshCookie(res, newRefreshToken);
+    res.json({ accessToken });
   } catch {
+    clearRefreshCookie(res);
     res.status(401).json({ error: 'Invalid or expired refresh token' });
   }
 });
@@ -317,6 +406,7 @@ router.get('/threads/connect', authenticateJwt, (req: AuthenticatedRequest, res:
 
   const state = jwt.sign({ userId: req.userId }, process.env.JWT_SECRET!, {
     expiresIn: '10m',
+    algorithm: 'HS256',
   });
 
   const url = new URL(THREADS_OAUTH_URL);
@@ -341,8 +431,10 @@ router.get('/threads/callback', async (req: Request, res: Response) => {
       return;
     }
 
-    // Verify state to prevent CSRF
-    const statePayload = jwt.verify(state, process.env.JWT_SECRET!) as {
+    // Verify state to prevent CSRF (pin to HS256)
+    const statePayload = jwt.verify(state, process.env.JWT_SECRET!, {
+      algorithms: ['HS256'],
+    }) as {
       userId: string;
     };
     const userId = statePayload.userId;
@@ -362,8 +454,7 @@ router.get('/threads/callback', async (req: Request, res: Response) => {
     });
 
     if (!tokenResponse.ok) {
-      const errorBody = await tokenResponse.text();
-      console.error('Token exchange failed:', errorBody);
+      console.error('Token exchange failed (status %d)', tokenResponse.status);
       res.status(400).json({ error: 'Failed to exchange authorization code' });
       return;
     }
@@ -413,13 +504,17 @@ router.get('/threads/callback', async (req: Request, res: Response) => {
       },
     });
 
-    // Redirect to the web app's connections page
+    // Validate redirect URL to prevent open redirects
     const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000';
-    res.redirect(`${appUrl}/settings/connections?connected=true`);
+    const redirectTarget = new URL('/settings/connections', appUrl);
+    redirectTarget.searchParams.set('connected', 'true');
+    res.redirect(redirectTarget.toString());
   } catch (error) {
     console.error('Threads OAuth callback error:', error);
     const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? 'http://localhost:3000';
-    res.redirect(`${appUrl}/settings/connections?error=oauth_failed`);
+    const redirectTarget = new URL('/settings/connections', appUrl);
+    redirectTarget.searchParams.set('error', 'oauth_failed');
+    res.redirect(redirectTarget.toString());
   }
 });
 

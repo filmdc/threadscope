@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { setAccessToken, setRefreshToken } from '@/lib/auth';
 
 export default function OAuthCallbackPage() {
   const router = useRouter();
@@ -12,45 +11,44 @@ export default function OAuthCallbackPage() {
 
   useEffect(() => {
     const error = searchParams.get('error');
-    const accessToken = searchParams.get('access_token');
-    const refreshToken = searchParams.get('refresh_token');
     const code = searchParams.get('code');
+    const connected = searchParams.get('connected');
 
     if (error) {
       setStatus('error');
       setErrorMessage(
         error === 'oauth_failed'
           ? 'Failed to connect your Threads account. Please try again.'
-          : `Authentication error: ${error}`
+          : 'Authentication error. Please try again.'
       );
       return;
     }
 
-    if (accessToken) {
-      setAccessToken(accessToken);
-      if (refreshToken) {
-        setRefreshToken(refreshToken);
-      }
+    // If redirected back from API with connected=true, go to connections page
+    if (connected === 'true') {
       router.push('/settings/connections?connected=true');
       return;
     }
 
     if (code) {
-      // Exchange code for tokens via the API
+      // Exchange code for tokens via the API (server-side handles token storage)
       const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
-      fetch(`${API_URL}/auth/threads/callback?code=${code}`, {
+      fetch(`${API_URL}/auth/threads/callback?code=${encodeURIComponent(code)}`, {
         method: 'GET',
         credentials: 'include',
       })
-        .then((res) => res.json())
+        .then((res) => {
+          if (res.redirected) {
+            // The API redirects to connections page on success
+            window.location.href = res.url;
+            return;
+          }
+          return res.json();
+        })
         .then((data) => {
-          if (data.accessToken) {
-            setAccessToken(data.accessToken);
-            if (data.refreshToken) {
-              setRefreshToken(data.refreshToken);
-            }
+          if (data?.success) {
             router.push('/settings/connections?connected=true');
-          } else {
+          } else if (data) {
             setStatus('error');
             setErrorMessage('Failed to complete authentication.');
           }

@@ -1,4 +1,6 @@
 import express from 'express';
+import crypto from 'crypto';
+import cookieParser from 'cookie-parser';
 import { corsMiddleware } from './middleware/cors';
 import { generalRateLimit } from './middleware/rate-limit';
 import { authRouter } from './router/auth';
@@ -11,6 +13,7 @@ const PORT = parseInt(process.env.PORT ?? '4000', 10);
 // ==================== Global Middleware ====================
 
 app.use(express.json({ limit: '10mb' }));
+app.use(cookieParser());
 app.use(corsMiddleware);
 app.use(generalRateLimit);
 
@@ -27,10 +30,10 @@ app.get('/health', async (_req, res) => {
       timestamp: new Date().toISOString(),
       uptime: process.uptime(),
     });
-  } catch (error) {
+  } catch {
+    // Don't expose internal error details
     res.status(503).json({
       status: 'unhealthy',
-      error: error instanceof Error ? error.message : 'Database connection failed',
     });
   }
 });
@@ -45,29 +48,65 @@ app.use('/api/v1/ext', extensionRouter);
 
 // ==================== Webhook Receiver ====================
 
-app.post('/api/webhooks/threads', express.json(), (req, res) => {
-  // Webhook verification (GET for subscription, POST for events)
-  if (req.query['hub.mode'] === 'subscribe') {
-    const verifyToken = process.env.THREADS_WEBHOOK_VERIFY_TOKEN;
-    if (req.query['hub.verify_token'] === verifyToken) {
-      res.send(req.query['hub.challenge']);
+/**
+ * Verify Meta webhook signature using HMAC-SHA256.
+ * Returns true if signature is valid, false otherwise.
+ */
+function verifyWebhookSignature(
+  rawBody: Buffer,
+  signature: string | undefined,
+  appSecret: string
+): boolean {
+  if (!signature) return false;
+
+  const expectedSig = crypto
+    .createHmac('sha256', appSecret)
+    .update(rawBody)
+    .digest('hex');
+
+  const expected = `sha256=${expectedSig}`;
+
+  // Use constant-time comparison to prevent timing attacks
+  if (signature.length !== expected.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
+}
+
+app.post(
+  '/api/webhooks/threads',
+  express.raw({ type: 'application/json' }),
+  (req, res) => {
+    const appSecret = process.env.THREADS_APP_SECRET;
+    if (!appSecret) {
+      res.status(500).send('Webhook not configured');
       return;
     }
-    res.status(403).send('Verification failed');
-    return;
+
+    // Verify the webhook signature
+    const signature = req.headers['x-hub-signature-256'] as string | undefined;
+    const rawBody = Buffer.isBuffer(req.body) ? req.body : Buffer.from(JSON.stringify(req.body));
+
+    if (!verifyWebhookSignature(rawBody, signature, appSecret)) {
+      res.status(403).send('Invalid signature');
+      return;
+    }
+
+    // Parse the verified body
+    const body = JSON.parse(rawBody.toString());
+
+    // Log only the event type, not the full payload (avoid leaking sensitive data)
+    console.log('Webhook event received: object=%s', body.object ?? 'unknown');
+
+    // TODO: Queue webhook processing job
+    res.sendStatus(200);
   }
+);
 
-  // Process webhook event
-  console.log('Webhook event received:', JSON.stringify(req.body));
-  // TODO: Queue webhook processing job
-  res.sendStatus(200);
-});
-
-// Webhook verification for GET requests
+// Webhook verification for GET requests (subscription confirmation)
 app.get('/api/webhooks/threads', (req, res) => {
   const verifyToken = process.env.THREADS_WEBHOOK_VERIFY_TOKEN;
   if (
     req.query['hub.mode'] === 'subscribe' &&
+    verifyToken &&
     req.query['hub.verify_token'] === verifyToken
   ) {
     res.send(req.query['hub.challenge']);

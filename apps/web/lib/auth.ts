@@ -1,36 +1,24 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
 
-const ACCESS_TOKEN_KEY = 'threadscope_access_token';
-const REFRESH_TOKEN_KEY = 'threadscope_refresh_token';
+// Store access token in memory only (not localStorage) to prevent XSS theft.
+// The short-lived access token is acceptable in memory since it expires in 15 minutes.
+// The refresh token is stored in an httpOnly cookie set by the API server.
+let accessToken: string | null = null;
 
 export function getAccessToken(): string | null {
-  if (typeof window === 'undefined') return null;
-  return localStorage.getItem(ACCESS_TOKEN_KEY);
+  return accessToken;
 }
 
 export function setAccessToken(token: string): void {
-  if (typeof window === 'undefined') return;
-  localStorage.setItem(ACCESS_TOKEN_KEY, token);
-}
-
-export function getRefreshToken(): string | null {
-  if (typeof window === 'undefined') return null;
-  return localStorage.getItem(REFRESH_TOKEN_KEY);
-}
-
-export function setRefreshToken(token: string): void {
-  if (typeof window === 'undefined') return;
-  localStorage.setItem(REFRESH_TOKEN_KEY, token);
+  accessToken = token;
 }
 
 export function clearTokens(): void {
-  if (typeof window === 'undefined') return;
-  localStorage.removeItem(ACCESS_TOKEN_KEY);
-  localStorage.removeItem(REFRESH_TOKEN_KEY);
+  accessToken = null;
 }
 
 export function isAuthenticated(): boolean {
-  return getAccessToken() !== null;
+  return accessToken !== null;
 }
 
 export async function fetchWithAuth(
@@ -47,14 +35,15 @@ export async function fetchWithAuth(
   const response = await fetch(url, {
     ...options,
     headers,
+    credentials: 'include', // Send httpOnly refresh cookie
   });
 
   if (response.status === 401) {
-    const refreshed = await refreshToken();
+    const refreshed = await refreshAccessToken();
     if (refreshed) {
       const newToken = getAccessToken();
       headers.set('Authorization', `Bearer ${newToken}`);
-      return fetch(url, { ...options, headers });
+      return fetch(url, { ...options, headers, credentials: 'include' });
     } else {
       clearTokens();
       if (typeof window !== 'undefined') {
@@ -75,6 +64,7 @@ export async function login(
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password }),
+      credentials: 'include', // Receive httpOnly refresh cookie
     });
 
     const data = await response.json();
@@ -85,9 +75,6 @@ export async function login(
 
     if (data.accessToken) {
       setAccessToken(data.accessToken);
-    }
-    if (data.refreshToken) {
-      setRefreshToken(data.refreshToken);
     }
 
     return { success: true };
@@ -106,6 +93,7 @@ export async function register(
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password, name }),
+      credentials: 'include', // Receive httpOnly refresh cookie
     });
 
     const data = await response.json();
@@ -117,9 +105,6 @@ export async function register(
     if (data.accessToken) {
       setAccessToken(data.accessToken);
     }
-    if (data.refreshToken) {
-      setRefreshToken(data.refreshToken);
-    }
 
     return { success: true };
   } catch {
@@ -127,15 +112,13 @@ export async function register(
   }
 }
 
-export async function refreshToken(): Promise<boolean> {
-  const token = getRefreshToken();
-  if (!token) return false;
-
+export async function refreshAccessToken(): Promise<boolean> {
   try {
+    // Refresh token is sent automatically via httpOnly cookie
     const response = await fetch(`${API_URL}/auth/refresh`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refreshToken: token }),
+      credentials: 'include',
     });
 
     if (!response.ok) return false;
@@ -144,9 +127,6 @@ export async function refreshToken(): Promise<boolean> {
 
     if (data.accessToken) {
       setAccessToken(data.accessToken);
-    }
-    if (data.refreshToken) {
-      setRefreshToken(data.refreshToken);
     }
 
     return true;
