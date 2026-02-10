@@ -1,0 +1,75 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: timescale/timescaledb-ha:pg16
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: threadscope
+      POSTGRES_PASSWORD: localdev
+      POSTGRES_DB: threadscope
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    ports:
+      - "4000:4000"
+    environment:
+      DATABASE_URL: postgresql://threadscope:localdev@postgres:5432/threadscope
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: local-dev-jwt-secret-min-32-characters-long
+      JWT_REFRESH_SECRET: local-dev-refresh-secret-min-32-characters
+      PORT: 4000
+      NODE_ENV: development
+      THREADS_APP_ID: ${THREADS_APP_ID}
+      THREADS_APP_SECRET: ${THREADS_APP_SECRET}
+      ENCRYPTION_KEY: local-dev-encryption-key-32chars!
+    depends_on:
+      - postgres
+      - redis
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    command: ["node", "dist/worker.js"]
+    environment:
+      DATABASE_URL: postgresql://threadscope:localdev@postgres:5432/threadscope
+      REDIS_URL: redis://redis:6379
+      NODE_ENV: development
+      THREADS_APP_ID: ${THREADS_APP_ID}
+      THREADS_APP_SECRET: ${THREADS_APP_SECRET}
+      ENCRYPTION_KEY: local-dev-encryption-key-32chars!
+    depends_on:
+      - postgres
+      - redis
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      API_URL: http://api:4000
+      NEXTAUTH_URL: http://localhost:3000
+      NEXTAUTH_SECRET: local-dev-nextauth-secret-32chars!
+      NEXT_PUBLIC_APP_URL: http://localhost:3000
+      NEXT_PUBLIC_API_URL: http://localhost:4000
+    depends_on:
+      - api
+
+volumes:
+  postgres_data:
+  redis_data:

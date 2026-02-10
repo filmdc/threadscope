@@ -1,0 +1,467 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [pg_trgm]
+}
+
+// ==================== AUTH & USERS ====================
+
+model User {
+  id              String    @id @default(cuid())
+  email           String    @unique
+  passwordHash    String?
+  name            String?
+  avatarUrl       String?
+  emailVerified   DateTime?
+  plan            Plan      @default(FREE)
+  stripeCustomerId String?  @unique
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  accounts        Account[]
+  sessions        Session[]
+  apiKeys         ApiKey[]
+  threadsConnection ThreadsConnection?
+  trackedKeywords TrackedKeyword[]
+  trackedCreators TrackedCreator[]
+  trackedPosts    TrackedPost[]
+  competitors     Competitor[]
+  reports         Report[]
+  alerts          Alert[]
+  scheduledPosts  ScheduledPost[]
+  exportJobs      ExportJob[]
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model ApiKey {
+  id          String   @id @default(cuid())
+  userId      String
+  name        String
+  keyHash     String   @unique
+  keyPrefix   String
+  lastUsedAt  DateTime?
+  expiresAt   DateTime?
+  createdAt   DateTime @default(now())
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+enum Plan {
+  FREE
+  STARTER
+  PRO
+  ENTERPRISE
+}
+
+// ==================== THREADS CONNECTION ====================
+
+model ThreadsConnection {
+  id                 String   @id @default(cuid())
+  userId             String   @unique
+  threadsUserId      String   @unique
+  username           String
+  profilePictureUrl  String?
+  biography          String?
+  isVerified         Boolean  @default(false)
+  accessToken        String
+  tokenExpiresAt     DateTime
+  scopes             String[]
+  lastSyncAt         DateTime?
+  connectedAt        DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ==================== OWN-ACCOUNT ANALYTICS ====================
+
+model AccountInsightsSnapshot {
+  id                 String   @id @default(cuid())
+  threadsUserId      String
+  date               DateTime @db.Date
+  views              Int?
+  likes              Int?
+  replies            Int?
+  reposts            Int?
+  quotes             Int?
+  followersCount     Int?
+  followersByCountry Json?
+  followersByCity    Json?
+  followersByAge     Json?
+  followersByGender  Json?
+
+  @@unique([threadsUserId, date])
+  @@index([threadsUserId, date(sort: Desc)])
+}
+
+model PostInsight {
+  id              String   @id @default(cuid())
+  threadsMediaId  String   @unique
+  threadsUserId   String
+  text            String?
+  mediaType       MediaType
+  permalink       String?
+  topicTag        String?
+  publishedAt     DateTime
+  views           Int      @default(0)
+  likes           Int      @default(0)
+  replies         Int      @default(0)
+  reposts         Int      @default(0)
+  quotes          Int      @default(0)
+  shares          Int      @default(0)
+  clicks          Int      @default(0)
+  engagementRate  Float?
+  lastSyncAt      DateTime @default(now())
+  createdAt       DateTime @default(now())
+
+  snapshots PostInsightSnapshot[]
+
+  @@index([threadsUserId, publishedAt(sort: Desc)])
+  @@index([topicTag])
+  @@index([engagementRate(sort: Desc)])
+}
+
+model PostInsightSnapshot {
+  id             String   @id @default(cuid())
+  postInsightId  String
+  views          Int
+  likes          Int
+  replies        Int
+  reposts        Int
+  quotes         Int
+  shares         Int
+  clicks         Int
+  capturedAt     DateTime @default(now())
+
+  postInsight PostInsight @relation(fields: [postInsightId], references: [id], onDelete: Cascade)
+
+  @@index([postInsightId, capturedAt(sort: Desc)])
+}
+
+enum MediaType {
+  TEXT
+  IMAGE
+  VIDEO
+  CAROUSEL
+}
+
+// ==================== TREND TRACKING ====================
+
+model TrackedKeyword {
+  id          String           @id @default(cuid())
+  userId      String
+  keyword     String
+  isActive    Boolean          @default(true)
+  createdAt   DateTime         @default(now())
+
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  dataPoints  KeywordTrendData[]
+  alerts      Alert[]
+
+  @@unique([userId, keyword])
+  @@index([userId, isActive])
+}
+
+model KeywordTrendData {
+  id               String   @id @default(cuid())
+  trackedKeywordId String
+  date             DateTime @db.Date
+  postCount        Int
+  totalLikes       Int      @default(0)
+  totalReplies     Int      @default(0)
+  totalReposts     Int      @default(0)
+  avgEngagement    Float?
+  topPostId        String?
+  topCreatorId     String?
+  sampleSize       Int      @default(0)
+
+  trackedKeyword TrackedKeyword @relation(fields: [trackedKeywordId], references: [id], onDelete: Cascade)
+
+  @@unique([trackedKeywordId, date])
+  @@index([trackedKeywordId, date(sort: Desc)])
+}
+
+// ==================== CREATOR / ACCOUNT DISCOVERY ====================
+
+model Creator {
+  id                 String   @id @default(cuid())
+  threadsUserId      String   @unique
+  username           String
+  profilePictureUrl  String?
+  biography          String?
+  isVerified         Boolean  @default(false)
+  observedPostCount  Int      @default(0)
+  avgLikes           Float?
+  avgReplies         Float?
+  avgReposts         Float?
+  avgEngagement      Float?
+  primaryTopics      String[]
+  postFrequency      String?
+  lastPostAt         DateTime?
+  firstSeenAt        DateTime @default(now())
+  lastSeenAt         DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  snapshots    CreatorSnapshot[]
+  trackedBy    TrackedCreator[]
+  competitors  Competitor[]
+  publicPosts  PublicPost[]
+}
+
+model CreatorSnapshot {
+  id               String   @id @default(cuid())
+  creatorId        String
+  observedPosts    Int
+  avgLikes         Float?
+  avgReplies       Float?
+  avgReposts       Float?
+  avgEngagement    Float?
+  capturedAt       DateTime @default(now())
+
+  creator Creator @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+
+  @@index([creatorId, capturedAt(sort: Desc)])
+}
+
+model TrackedCreator {
+  id        String   @id @default(cuid())
+  userId    String
+  creatorId String
+  notes     String?
+  tags      String[]
+  createdAt DateTime @default(now())
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  creator Creator @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, creatorId])
+}
+
+// ==================== PUBLIC POSTS ====================
+
+model PublicPost {
+  id              String    @id @default(cuid())
+  threadsMediaId  String    @unique
+  creatorId       String?
+  username        String
+  text            String?
+  mediaType       MediaType
+  permalink       String?
+  topicTag        String?
+  publishedAt     DateTime
+  likes           Int       @default(0)
+  replies         Int       @default(0)
+  reposts         Int       @default(0)
+  isQuotePost     Boolean   @default(false)
+  discoveredVia   String?
+  discoveryKeyword String?
+  firstSeenAt     DateTime  @default(now())
+  lastSeenAt      DateTime  @default(now())
+
+  creator  Creator?   @relation(fields: [creatorId], references: [id])
+  trackedBy TrackedPost[]
+  snapshots PublicPostSnapshot[]
+
+  @@index([username])
+  @@index([publishedAt(sort: Desc)])
+  @@index([topicTag])
+  @@index([discoveryKeyword])
+}
+
+model PublicPostSnapshot {
+  id           String   @id @default(cuid())
+  publicPostId String
+  likes        Int
+  replies      Int
+  reposts      Int
+  capturedAt   DateTime @default(now())
+
+  publicPost PublicPost @relation(fields: [publicPostId], references: [id], onDelete: Cascade)
+
+  @@index([publicPostId, capturedAt(sort: Desc)])
+}
+
+model TrackedPost {
+  id           String   @id @default(cuid())
+  userId       String
+  publicPostId String
+  notes        String?
+  createdAt    DateTime @default(now())
+
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  publicPost PublicPost @relation(fields: [publicPostId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, publicPostId])
+}
+
+// ==================== COMPETITORS ====================
+
+model Competitor {
+  id        String   @id @default(cuid())
+  userId    String
+  creatorId String
+  label     String?
+  notes     String?
+  createdAt DateTime @default(now())
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  creator Creator @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, creatorId])
+}
+
+// ==================== COMPOSE & SCHEDULING ====================
+
+model ScheduledPost {
+  id            String          @id @default(cuid())
+  userId        String
+  text          String
+  mediaType     MediaType       @default(TEXT)
+  mediaUrls     String[]
+  replyToId     String?
+  replyControl  String?
+  topicTag      String?
+  pollOptions   String[]
+  pollDuration  Int?
+  linkUrl       String?
+  scheduledFor  DateTime
+  status        ScheduleStatus  @default(PENDING)
+  threadsMediaId String?
+  errorMessage  String?
+  createdAt     DateTime        @default(now())
+  publishedAt   DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, scheduledFor])
+  @@index([status, scheduledFor])
+}
+
+enum ScheduleStatus {
+  PENDING
+  PUBLISHING
+  PUBLISHED
+  FAILED
+  CANCELLED
+}
+
+// ==================== REPORTS ====================
+
+model Report {
+  id             String       @id @default(cuid())
+  userId         String
+  name           String
+  type           ReportType
+  parameters     Json
+  status         ReportStatus @default(QUEUED)
+  resultSummary  Json?
+  resultData     Json?
+  resultCount    Int?
+  processingTime Int?
+  errorMessage   String?
+  createdAt      DateTime     @default(now())
+  completedAt    DateTime?
+
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  exportJobs ExportJob[]
+
+  @@index([userId, createdAt(sort: Desc)])
+}
+
+enum ReportType {
+  ACCOUNT_PERFORMANCE
+  POST_PERFORMANCE
+  KEYWORD_TREND
+  CREATOR_DISCOVERY
+  COMPETITOR_BENCHMARK
+  CONTENT_ANALYSIS
+  AUDIENCE_INSIGHTS
+  TOPIC_LANDSCAPE
+}
+
+enum ReportStatus {
+  QUEUED
+  PROCESSING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+// ==================== ALERTS ====================
+
+model Alert {
+  id               String     @id @default(cuid())
+  userId           String
+  trackedKeywordId String?
+  type             AlertType
+  condition        Json
+  channels         String[]
+  isActive         Boolean    @default(true)
+  lastTriggered    DateTime?
+  triggerCount     Int        @default(0)
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  trackedKeyword TrackedKeyword? @relation(fields: [trackedKeywordId], references: [id])
+}
+
+enum AlertType {
+  KEYWORD_SPIKE
+  KEYWORD_TREND_CHANGE
+  MENTION_ALERT
+  COMPETITOR_POST
+  ENGAGEMENT_MILESTONE
+  FOLLOWER_MILESTONE
+}
+
+// ==================== EXPORTS ====================
+
+model ExportJob {
+  id         String       @id @default(cuid())
+  userId     String
+  reportId   String
+  format     ExportFormat
+  status     ReportStatus @default(QUEUED)
+  fileUrl    String?
+  fileSize   Int?
+  createdAt  DateTime     @default(now())
+  expiresAt  DateTime?
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  report Report @relation(fields: [reportId], references: [id], onDelete: Cascade)
+}
+
+enum ExportFormat {
+  CSV
+  XLSX
+  PDF
+  JSON
+}
