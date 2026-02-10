@@ -83,6 +83,51 @@ export const dateRangeSchema = z
     { message: 'Start date must be before end date' },
   );
 
+/**
+ * Alert configuration schema.
+ */
+export const alertConfigSchema = z.object({
+  type: z.enum([
+    'KEYWORD_SPIKE',
+    'KEYWORD_TREND_CHANGE',
+    'MENTION_ALERT',
+    'COMPETITOR_POST',
+    'ENGAGEMENT_MILESTONE',
+    'FOLLOWER_MILESTONE',
+  ]),
+  condition: z.object({
+    threshold: z.number(),
+    metric: z.string().max(50),
+    direction: z.enum(['above', 'below']),
+  }),
+  channels: z.array(z.enum(['email', 'push', 'in_app'])).min(1),
+  trackedKeywordId: z.string().optional(),
+});
+
+/**
+ * Report configuration schema.
+ */
+export const reportConfigSchema = z.object({
+  type: z.enum([
+    'ACCOUNT_PERFORMANCE',
+    'POST_PERFORMANCE',
+    'KEYWORD_TREND',
+    'CREATOR_DISCOVERY',
+    'COMPETITOR_BENCHMARK',
+    'CONTENT_ANALYSIS',
+    'AUDIENCE_INSIGHTS',
+    'TOPIC_LANDSCAPE',
+  ]),
+  parameters: z.object({
+    days: z.number().int().min(1).max(365).optional(),
+    startDate: z.string().datetime().optional(),
+    endDate: z.string().datetime().optional(),
+    mediaType: z.enum(['TEXT', 'IMAGE', 'VIDEO', 'CAROUSEL']).optional(),
+    keyword: z.string().max(100).optional(),
+    creatorId: z.string().optional(),
+  }).optional().default({}),
+});
+
 // -------------------------------------------------------
 // Inferred types (re-export for convenience)
 // -------------------------------------------------------
@@ -92,3 +137,5 @@ export type PasswordInput = z.infer<typeof passwordSchema>;
 export type KeywordInput = z.infer<typeof keywordSchema>;
 export type ComposePostSchemaInput = z.infer<typeof composePostSchema>;
 export type DateRangeInput = z.infer<typeof dateRangeSchema>;
+export type AlertConfigInput = z.infer<typeof alertConfigSchema>;
+export type ReportConfigInput = z.infer<typeof reportConfigSchema>;
