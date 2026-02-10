@@ -39,8 +39,18 @@ export default function OAuthCallbackPage() {
       })
         .then((res) => {
           if (res.redirected) {
-            // The API redirects to connections page on success
-            window.location.href = res.url;
+            // Validate redirect is same-origin to prevent open redirect attacks
+            try {
+              const redirectUrl = new URL(res.url);
+              if (redirectUrl.origin === window.location.origin) {
+                window.location.href = res.url;
+                return;
+              }
+            } catch {
+              // Invalid URL — fall through to error
+            }
+            setStatus('error');
+            setErrorMessage('Unexpected redirect during authentication.');
             return;
           }
           return res.json();

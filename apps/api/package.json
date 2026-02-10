@@ -2,6 +2,11 @@
   "name": "@threadscope/api",
   "version": "0.0.1",
   "private": true,
+  "main": "./src/server.ts",
+  "exports": {
+    ".": "./src/server.ts",
+    "./trpc": "./src/trpc/router.ts"
+  },
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc",

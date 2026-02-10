@@ -165,16 +165,22 @@ export class ThreadsApiClient {
     url.searchParams.set('client_secret', clientSecret);
     url.searchParams.set('access_token', shortLivedToken);
 
-    const response = await fetch(url.toString());
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({}));
-      throw new ThreadsApiError(
-        `Token exchange failed: ${response.status}`,
-        response.status,
-        error
-      );
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30_000);
+    try {
+      const response = await fetch(url.toString(), { signal: controller.signal });
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        throw new ThreadsApiError(
+          `Token exchange failed: ${response.status}`,
+          response.status,
+          error
+        );
+      }
+      return response.json() as Promise<TokenResponse>;
+    } finally {
+      clearTimeout(timeout);
     }
-    return response.json() as Promise<TokenResponse>;
   }
 
   static async refreshToken(token: string): Promise<TokenResponse> {
@@ -182,16 +188,22 @@ export class ThreadsApiClient {
     url.searchParams.set('grant_type', 'th_refresh_token');
     url.searchParams.set('access_token', token);
 
-    const response = await fetch(url.toString());
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({}));
-      throw new ThreadsApiError(
-        `Token refresh failed: ${response.status}`,
-        response.status,
-        error
-      );
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30_000);
+    try {
+      const response = await fetch(url.toString(), { signal: controller.signal });
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        throw new ThreadsApiError(
+          `Token refresh failed: ${response.status}`,
+          response.status,
+          error
+        );
+      }
+      return response.json() as Promise<TokenResponse>;
+    } finally {
+      clearTimeout(timeout);
     }
-    return response.json() as Promise<TokenResponse>;
   }
 
   // ==================== Profile ====================
@@ -484,8 +496,12 @@ export class ThreadsApiClient {
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
+        const controller = new AbortController();
+        const fetchTimeout = setTimeout(() => controller.abort(), 30_000);
+
         const fetchOptions: RequestInit = {
           method,
+          signal: controller.signal,
           headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${this.accessToken}`,
@@ -496,7 +512,12 @@ export class ThreadsApiClient {
           fetchOptions.body = JSON.stringify(body);
         }
 
-        const response = await fetch(url.toString(), fetchOptions);
+        let response: Response;
+        try {
+          response = await fetch(url.toString(), fetchOptions);
+        } finally {
+          clearTimeout(fetchTimeout);
+        }
 
         // Handle rate limiting
         if (response.status === 429) {
@@ -539,9 +560,11 @@ export class ThreadsApiClient {
 // ==================== Auto-Paginate Helper ====================
 
 export async function* paginateAll<T>(
-  fetcher: (cursor?: string) => Promise<PaginatedResponse<T>>
+  fetcher: (cursor?: string) => Promise<PaginatedResponse<T>>,
+  maxPages = 100,
 ): AsyncGenerator<T> {
   let cursor: string | undefined;
+  let page = 0;
 
   do {
     const response = await fetcher(cursor);
@@ -551,7 +574,8 @@ export async function* paginateAll<T>(
     }
 
     cursor = response.paging?.cursors?.after;
-  } while (cursor);
+    page++;
+  } while (cursor && page < maxPages);
 }
 
 // ==================== Error Class ====================

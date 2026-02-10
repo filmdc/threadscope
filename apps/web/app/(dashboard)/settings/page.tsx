@@ -1,26 +1,10 @@
+'use client';
+
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { trpc } from '@/lib/trpc';
 
 const settingsSections = [
-  {
-    title: 'Account',
-    description: 'Manage your profile, email, and password.',
-    href: '/settings',
-    icon: (
-      <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
-      </svg>
-    ),
-  },
-  {
-    title: 'Billing',
-    description: 'Manage your subscription and payment methods.',
-    href: '/settings',
-    icon: (
-      <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5z" />
-      </svg>
-    ),
-  },
   {
     title: 'Connections',
     description: 'Connect and manage your Threads account.',
@@ -34,7 +18,7 @@ const settingsSections = [
   {
     title: 'API Keys',
     description: 'Generate and manage API keys for integrations.',
-    href: '/settings',
+    href: '/settings/api-keys',
     icon: (
       <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z" />
@@ -54,6 +38,44 @@ const settingsSections = [
 ];
 
 export default function SettingsPage() {
+  const { data: profile, isLoading } = trpc.settings.getProfile.useQuery();
+  const utils = trpc.useUtils();
+
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [confirmEmail, setConfirmEmail] = useState('');
+
+  useEffect(() => {
+    if (profile) {
+      setName(profile.name ?? '');
+      setEmail(profile.email);
+    }
+  }, [profile]);
+
+  const updateMutation = trpc.settings.updateProfile.useMutation({
+    onSuccess: () => {
+      utils.settings.getProfile.invalidate();
+    },
+  });
+
+  const deleteMutation = trpc.settings.deleteAccount.useMutation({
+    onSuccess: () => {
+      window.location.href = '/';
+    },
+  });
+
+  function handleSave() {
+    updateMutation.mutate({
+      ...(name !== (profile?.name ?? '') && { name }),
+      ...(email !== profile?.email && { email }),
+    });
+  }
+
+  function handleDelete() {
+    deleteMutation.mutate({ confirmEmail });
+  }
+
   return (
     <div className="space-y-6">
       <div>
@@ -82,31 +104,57 @@ export default function SettingsPage() {
       {/* Account section */}
       <div className="bg-white rounded-xl border border-slate-200 p-6">
         <h2 className="text-lg font-semibold text-slate-900 mb-4">Account Details</h2>
-        <div className="space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1.5">Name</label>
-              <input
-                type="text"
-                placeholder="Your name"
-                className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent text-sm"
-              />
+        {isLoading ? (
+          <div className="space-y-4 animate-pulse">
+            <div className="h-10 bg-slate-100 rounded-lg" />
+            <div className="h-10 bg-slate-100 rounded-lg" />
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">Name</label>
+                <input
+                  type="text"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Your name"
+                  className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1.5">Email</label>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@example.com"
+                  className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent text-sm"
+                />
+              </div>
             </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1.5">Email</label>
-              <input
-                type="email"
-                placeholder="you@example.com"
-                className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent text-sm"
-              />
+            {profile && (
+              <p className="text-xs text-slate-400">
+                Plan: {profile.plan} · Member since {new Date(profile.createdAt).toLocaleDateString()}
+              </p>
+            )}
+            {updateMutation.isError && (
+              <p className="text-sm text-danger-500">{updateMutation.error.message}</p>
+            )}
+            {updateMutation.isSuccess && (
+              <p className="text-sm text-success-600">Profile updated successfully.</p>
+            )}
+            <div className="pt-2">
+              <button
+                onClick={handleSave}
+                disabled={updateMutation.isPending}
+                className="px-4 py-2 bg-brand-500 text-white rounded-lg font-medium text-sm hover:bg-brand-600 disabled:opacity-50 transition-colors"
+              >
+                {updateMutation.isPending ? 'Saving...' : 'Save Changes'}
+              </button>
             </div>
           </div>
-          <div className="pt-2">
-            <button className="px-4 py-2 bg-brand-500 text-white rounded-lg font-medium text-sm hover:bg-brand-600 transition-colors">
-              Save Changes
-            </button>
-          </div>
-        </div>
+        )}
       </div>
 
       {/* Danger zone */}
@@ -115,9 +163,45 @@ export default function SettingsPage() {
         <p className="text-sm text-slate-500 mb-4">
           Permanently delete your account and all associated data.
         </p>
-        <button className="px-4 py-2 bg-white border border-danger-300 text-danger-600 rounded-lg font-medium text-sm hover:bg-danger-50 transition-colors">
-          Delete Account
-        </button>
+        {!showDeleteConfirm ? (
+          <button
+            onClick={() => setShowDeleteConfirm(true)}
+            className="px-4 py-2 bg-white border border-danger-300 text-danger-600 rounded-lg font-medium text-sm hover:bg-danger-50 transition-colors"
+          >
+            Delete Account
+          </button>
+        ) : (
+          <div className="space-y-3">
+            <p className="text-sm text-slate-700">
+              Type your email address <strong>{profile?.email}</strong> to confirm:
+            </p>
+            <input
+              type="email"
+              value={confirmEmail}
+              onChange={(e) => setConfirmEmail(e.target.value)}
+              placeholder="Enter your email to confirm"
+              className="w-full max-w-sm px-3.5 py-2.5 rounded-lg border border-danger-300 text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-danger-500 focus:border-transparent text-sm"
+            />
+            {deleteMutation.isError && (
+              <p className="text-sm text-danger-500">{deleteMutation.error.message}</p>
+            )}
+            <div className="flex gap-3">
+              <button
+                onClick={handleDelete}
+                disabled={deleteMutation.isPending || !confirmEmail}
+                className="px-4 py-2 bg-danger-600 text-white rounded-lg font-medium text-sm hover:bg-danger-700 disabled:opacity-50 transition-colors"
+              >
+                {deleteMutation.isPending ? 'Deleting...' : 'Permanently Delete'}
+              </button>
+              <button
+                onClick={() => { setShowDeleteConfirm(false); setConfirmEmail(''); }}
+                className="px-4 py-2 bg-white border border-slate-300 text-slate-700 rounded-lg font-medium text-sm hover:bg-slate-50 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -2,19 +2,30 @@
 
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
+import { trpc } from '@/lib/trpc';
+import { useConnectionStatus } from '@/lib/hooks/use-connection-status';
 
 export default function ConnectionsPage() {
   const searchParams = useSearchParams();
-  const [connected, setConnected] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   const [showError, setShowError] = useState(false);
-  const [connectedUsername, setConnectedUsername] = useState('');
+
+  const { data: connectionStatus } = useConnectionStatus();
+  const connected = connectionStatus?.isConnected ?? false;
+  const connectedUsername = connectionStatus?.username ?? '';
+
+  const utils = trpc.useUtils();
+
+  const disconnectMutation = trpc.settings.disconnect.useMutation({
+    onSuccess: () => {
+      utils.dashboard.connectionStatus.invalidate();
+    },
+  });
 
   useEffect(() => {
     if (searchParams.get('connected') === 'true') {
-      setConnected(true);
-      setConnectedUsername('your_threads_handle');
       setShowSuccess(true);
+      utils.dashboard.connectionStatus.invalidate();
       const timer = setTimeout(() => setShowSuccess(false), 5000);
       return () => clearTimeout(timer);
     }
@@ -23,7 +34,7 @@ export default function ConnectionsPage() {
       const timer = setTimeout(() => setShowError(false), 5000);
       return () => clearTimeout(timer);
     }
-  }, [searchParams]);
+  }, [searchParams, utils]);
 
   function handleConnect() {
     const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
@@ -31,8 +42,7 @@ export default function ConnectionsPage() {
   }
 
   function handleDisconnect() {
-    setConnected(false);
-    setConnectedUsername('');
+    disconnectMutation.mutate();
   }
 
   return (
@@ -64,6 +74,15 @@ export default function ConnectionsPage() {
           </svg>
           <p className="text-sm text-danger-700 font-medium">
             Failed to connect your Threads account. Please try again.
+          </p>
+        </div>
+      )}
+
+      {/* Disconnect error */}
+      {disconnectMutation.isError && (
+        <div className="flex items-center gap-3 p-4 rounded-xl bg-danger-50 border border-danger-200">
+          <p className="text-sm text-danger-700 font-medium">
+            {disconnectMutation.error.message}
           </p>
         </div>
       )}
@@ -105,9 +124,10 @@ export default function ConnectionsPage() {
           {connected ? (
             <button
               onClick={handleDisconnect}
-              className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg font-medium text-sm hover:bg-slate-50 transition-colors"
+              disabled={disconnectMutation.isPending}
+              className="px-4 py-2 border border-slate-300 text-slate-700 rounded-lg font-medium text-sm hover:bg-slate-50 disabled:opacity-50 transition-colors"
             >
-              Disconnect
+              {disconnectMutation.isPending ? 'Disconnecting...' : 'Disconnect'}
             </button>
           ) : (
             <button

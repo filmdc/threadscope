@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { prisma } from '../lib/db';
 import { encrypt, decrypt } from '../lib/encryption';
 import { authenticateJwt, AuthenticatedRequest } from '../middleware/auth';
-import { authRateLimit } from '../middleware/rate-limit';
+import { authRateLimit, loginAccountRateLimit } from '../middleware/rate-limit';
 import {
   JWT_ACCESS_EXPIRY,
   JWT_REFRESH_EXPIRY,
@@ -44,7 +44,10 @@ const REFRESH_COOKIE_NAME = 'ts_refresh';
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 
 function generateTokens(user: { id: string; email: string; plan: string }) {
-  const jwtSecret = process.env.JWT_SECRET!;
+  const jwtSecret = process.env.JWT_SECRET;
+  if (!jwtSecret) {
+    throw new Error('JWT_SECRET environment variable is required');
+  }
 
   const accessToken = jwt.sign(
     { sub: user.id, email: user.email, plan: user.plan },
@@ -55,7 +58,10 @@ function generateTokens(user: { id: string; email: string; plan: string }) {
   // Create a unique session for refresh token rotation
   const jti = crypto.randomUUID();
 
-  const refreshSecret = process.env.JWT_REFRESH_SECRET!;
+  const refreshSecret = process.env.JWT_REFRESH_SECRET;
+  if (!refreshSecret) {
+    throw new Error('JWT_REFRESH_SECRET environment variable is required');
+  }
   const refreshToken = jwt.sign(
     { sub: user.id, type: 'refresh', jti },
     refreshSecret,
@@ -151,7 +157,7 @@ router.post('/register', authRateLimit, async (req: Request, res: Response) => {
 /**
  * POST /auth/login
  */
-router.post('/login', authRateLimit, async (req: Request, res: Response) => {
+router.post('/login', authRateLimit, loginAccountRateLimit, async (req: Request, res: Response) => {
   try {
     const body = loginSchema.parse(req.body);
 
@@ -240,7 +246,10 @@ router.post('/refresh', authRateLimit, async (req: Request, res: Response) => {
     });
 
     if (!session || session.expires < new Date()) {
-      // Token reuse detected or session expired - invalidate all sessions for this user
+      // Token reuse detected or session expired — invalidate ALL sessions for this user
+      // This is a critical security measure: if a refresh token is replayed after
+      // rotation, it means the token was likely stolen. Wipe all sessions.
+      await prisma.session.deleteMany({ where: { userId: payload.sub } });
       clearRefreshCookie(res);
       res.status(401).json({ error: 'Invalid or expired refresh token' });
       return;
@@ -279,6 +288,38 @@ router.post('/refresh', authRateLimit, async (req: Request, res: Response) => {
   } catch {
     clearRefreshCookie(res);
     res.status(401).json({ error: 'Invalid or expired refresh token' });
+  }
+});
+
+/**
+ * POST /auth/logout
+ * Invalidates the current refresh token session server-side and clears the cookie.
+ */
+router.post('/logout', async (req: Request, res: Response) => {
+  try {
+    const refreshTokenValue = req.cookies?.[REFRESH_COOKIE_NAME];
+    if (refreshTokenValue) {
+      const refreshSecret = process.env.JWT_REFRESH_SECRET;
+      if (refreshSecret) {
+        try {
+          const payload = jwt.verify(refreshTokenValue, refreshSecret, {
+            algorithms: ['HS256'],
+          }) as { jti?: string };
+          if (payload.jti) {
+            await prisma.session.deleteMany({
+              where: { sessionToken: payload.jti },
+            });
+          }
+        } catch {
+          // Token invalid/expired — still clear the cookie
+        }
+      }
+    }
+    clearRefreshCookie(res);
+    res.json({ success: true });
+  } catch {
+    clearRefreshCookie(res);
+    res.json({ success: true });
   }
 });
 
@@ -349,11 +390,13 @@ router.get('/api-keys', authenticateJwt, async (req: AuthenticatedRequest, res: 
  */
 router.post('/api-keys', authenticateJwt, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { name } = req.body as { name?: string };
-    if (!name) {
-      res.status(400).json({ error: 'API key name is required' });
+    const apiKeySchema = z.object({ name: z.string().min(1).max(100) });
+    const parsed = apiKeySchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: 'API key name is required (1-100 characters)' });
       return;
     }
+    const { name } = parsed.data;
 
     // Generate a secure random API key
     const rawKey = `ts_${crypto.randomBytes(32).toString('hex')}`;
