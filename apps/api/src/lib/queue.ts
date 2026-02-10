@@ -1,18 +1,29 @@
-import { Queue } from 'bullmq';
+import { Queue, type QueueOptions } from 'bullmq';
 import { createRedisConnection } from './redis';
 
 const connection = createRedisConnection();
 
-export const syncAnalyticsQueue = new Queue('sync-own-analytics', { connection });
-export const accountSnapshotQueue = new Queue('account-snapshot', { connection });
-export const keywordTrendQueue = new Queue('keyword-trend-collection', { connection });
-export const competitorSnapshotQueue = new Queue('competitor-snapshot', { connection });
-export const engagementSnapshotQueue = new Queue('engagement-snapshot', { connection });
-export const scheduledPostQueue = new Queue('scheduled-post-publisher', { connection });
-export const alertEvaluationQueue = new Queue('alert-evaluation', { connection });
-export const tokenRefreshQueue = new Queue('token-refresh', { connection });
-export const reportGenerationQueue = new Queue('report-generation', { connection });
-export const dataCleanupQueue = new Queue('data-cleanup', { connection });
+const defaultJobOptions: QueueOptions['defaultJobOptions'] = {
+  attempts: 3,
+  backoff: { type: 'exponential', delay: 5000 },
+  removeOnComplete: { count: 1000 },
+  removeOnFail: { count: 5000 },
+};
+
+function createQueue(name: string): Queue {
+  return new Queue(name, { connection, defaultJobOptions });
+}
+
+export const syncAnalyticsQueue = createQueue('sync-own-analytics');
+export const accountSnapshotQueue = createQueue('account-snapshot');
+export const keywordTrendQueue = createQueue('keyword-trend-collection');
+export const competitorSnapshotQueue = createQueue('competitor-snapshot');
+export const engagementSnapshotQueue = createQueue('engagement-snapshot');
+export const scheduledPostQueue = createQueue('scheduled-post-publisher');
+export const alertEvaluationQueue = createQueue('alert-evaluation');
+export const tokenRefreshQueue = createQueue('token-refresh');
+export const reportGenerationQueue = createQueue('report-generation');
+export const dataCleanupQueue = createQueue('data-cleanup');
 
 export const allQueues = {
   syncAnalytics: syncAnalyticsQueue,

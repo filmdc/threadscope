@@ -13,13 +13,26 @@ export const generalRateLimit = rateLimit({
   },
 });
 
-// Stricter rate limit for auth endpoints
+// Stricter rate limit for auth endpoints (per IP)
 export const authRateLimit = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 20, // 20 attempts per 15 min
+  max: 20, // 20 attempts per 15 min per IP
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many authentication attempts, please try again later' },
+});
+
+// Per-account rate limit for login (keyed by email in request body)
+export const loginAccountRateLimit = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10, // 10 attempts per email per 15 min
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many login attempts for this account, please try again later' },
+  keyGenerator: (req) => {
+    const email = (req.body as Record<string, unknown>)?.email;
+    return typeof email === 'string' ? email.toLowerCase() : req.ip ?? 'unknown';
+  },
 });
 
 // Extension API rate limit

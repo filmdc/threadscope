@@ -9,7 +9,8 @@ const allowedExtensionId = process.env.EXTENSION_ID;
 
 export const corsMiddleware = cors({
   origin: (origin, callback) => {
-    // Allow requests with no origin (mobile apps, curl, etc.)
+    // Requests with no Origin header (server-to-server, curl, mobile apps).
+    // These bypass CORS but are still gated by JWT/API-key auth on each route.
     if (!origin) {
       callback(null, true);
       return;
@@ -30,7 +31,7 @@ export const corsMiddleware = cors({
       return;
     }
 
-    callback(new Error(`Origin ${origin} not allowed by CORS`));
+    callback(new Error('Not allowed by CORS'));
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
