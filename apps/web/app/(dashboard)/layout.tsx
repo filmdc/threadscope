@@ -2,7 +2,9 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { usePathname } from 'next/navigation';
+import { useConnectionStatus } from '@/lib/hooks/use-connection-status';
 
 const navItems = [
   {
@@ -96,6 +98,7 @@ export default function DashboardLayout({
 }) {
   const pathname = usePathname();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const { data: connectionStatus } = useConnectionStatus();
 
   function isActive(href: string) {
     if (href === '/') return pathname === '/';
@@ -177,17 +180,42 @@ export default function DashboardLayout({
             </h2>
           </div>
           <div className="flex items-center gap-3">
-            <Link
-              href="/settings/connections"
-              className="px-4 py-2 rounded-lg bg-brand-500 text-white text-sm font-medium hover:bg-brand-600 transition-colors"
-            >
-              Connect Threads
-            </Link>
-            <div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center">
-              <svg className="w-5 h-5 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
-              </svg>
-            </div>
+            {connectionStatus?.isConnected ? (
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-slate-600">
+                  @{connectionStatus.username}
+                </span>
+                {connectionStatus.profilePictureUrl ? (
+                  <Image
+                    src={connectionStatus.profilePictureUrl}
+                    alt="Profile"
+                    width={32}
+                    height={32}
+                    className="rounded-full object-cover"
+                  />
+                ) : (
+                  <div className="w-8 h-8 rounded-full bg-brand-100 flex items-center justify-center">
+                    <span className="text-brand-600 text-xs font-bold">
+                      {connectionStatus.username?.[0]?.toUpperCase() ?? 'T'}
+                    </span>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <Link
+                href="/settings/connections"
+                className="px-4 py-2 rounded-lg bg-brand-500 text-white text-sm font-medium hover:bg-brand-600 transition-colors"
+              >
+                Connect Threads
+              </Link>
+            )}
+            {!connectionStatus?.isConnected && (
+              <div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center">
+                <svg className="w-5 h-5 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
+                </svg>
+              </div>
+            )}
           </div>
         </header>
 
