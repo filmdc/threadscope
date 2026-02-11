@@ -77,8 +77,9 @@ See the full list below in Part B, Step 4. Cross-reference with `.env.example` i
 
 #### Step 2: Add PostgreSQL Service
 1. Click **"+ New"** → **"Database"** → **"PostgreSQL"**
-2. For TimescaleDB: instead use **"Docker Image"** and set image to `timescale/timescaledb-ha:pg16`
-3. Railway will auto-generate `DATABASE_URL` — note the variable reference: `${{Postgres.DATABASE_URL}}`
+2. Railway will auto-generate `DATABASE_URL` — note the variable reference: `${{Postgres.DATABASE_URL}}`
+
+> **Note:** We're using plain PostgreSQL for now. The Prisma schema only requires `pg_trgm`, not any TimescaleDB-specific features. TimescaleDB (`timescale/timescaledb-ha:pg16` deployed as a Docker image on Railway) is an option to revisit later if time-series query performance becomes a bottleneck.
 
 #### Step 3: Add Redis Service
 1. Click **"+ New"** → **"Database"** → **"Redis"**
