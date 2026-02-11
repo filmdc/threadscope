@@ -1,5 +1,4 @@
 import express from 'express';
-import crypto from 'crypto';
 import cookieParser from 'cookie-parser';
 import * as trpcExpress from '@trpc/server/adapters/express';
 import { corsMiddleware } from './middleware/cors';
@@ -11,6 +10,7 @@ import { appRouter } from './trpc/router';
 import { createContext } from './trpc/context';
 import { startScheduler } from './scheduler';
 import { alertEvaluationQueue, syncAnalyticsQueue } from './lib/queue';
+import { verifyWebhookSignature } from './lib/webhook';
 
 const app = express();
 const PORT = parseInt(process.env.PORT ?? '4000', 10);
@@ -21,29 +21,6 @@ app.set('trust proxy', 1);
 
 // ==================== Webhook Receiver ====================
 // Mounted BEFORE express.json() to ensure raw body is available for HMAC verification.
-
-/**
- * Verify Meta webhook signature using HMAC-SHA256.
- * Returns true if signature is valid, false otherwise.
- */
-function verifyWebhookSignature(
-  rawBody: Buffer,
-  signature: string | undefined,
-  appSecret: string
-): boolean {
-  if (!signature) return false;
-
-  const expectedSig = crypto
-    .createHmac('sha256', appSecret)
-    .update(rawBody)
-    .digest('hex');
-
-  const expected = `sha256=${expectedSig}`;
-
-  // Use constant-time comparison to prevent timing attacks
-  if (signature.length !== expected.length) return false;
-  return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected));
-}
 
 app.post(
   '/api/webhooks/threads',
