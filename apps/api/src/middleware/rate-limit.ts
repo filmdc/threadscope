@@ -9,7 +9,7 @@ export const generalRateLimit = rateLimit({
   message: { error: 'Too many requests, please try again later' },
   keyGenerator: (req) => {
     // Use user ID if authenticated, otherwise IP
-    return (req as Record<string, unknown>).userId as string ?? req.ip ?? 'unknown';
+    return (req as unknown as Record<string, unknown>).userId as string ?? req.ip ?? 'unknown';
   },
 });
 
@@ -43,6 +43,6 @@ export const extensionRateLimit = rateLimit({
   legacyHeaders: false,
   message: { error: 'Extension rate limit exceeded' },
   keyGenerator: (req) => {
-    return (req as Record<string, unknown>).userId as string ?? req.ip ?? 'unknown';
+    return (req as unknown as Record<string, unknown>).userId as string ?? req.ip ?? 'unknown';
   },
 });
