@@ -425,7 +425,7 @@ router.post('/api-keys', authenticateJwt, async (req: AuthenticatedRequest, res:
 router.delete('/api-keys/:id', authenticateJwt, async (req: AuthenticatedRequest, res: Response) => {
   try {
     await prisma.apiKey.deleteMany({
-      where: { id: req.params.id, userId: req.userId! },
+      where: { id: String(req.params.id), userId: req.userId! },
     });
     res.json({ success: true });
   } catch {

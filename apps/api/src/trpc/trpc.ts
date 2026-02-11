@@ -41,7 +41,7 @@ export const protectedProcedure = t.procedure.use(
       });
     }
     return next({
-      ctx: { ...ctx, userId: ctx.userId, user: ctx.user },
+      ctx: { userId: ctx.userId, user: ctx.user },
     });
   }),
 );
@@ -53,7 +53,7 @@ export const protectedProcedure = t.procedure.use(
 export const connectedProcedure = protectedProcedure.use(
   middleware(async ({ ctx, next }) => {
     const connection = await ctx.prisma.threadsConnection.findUnique({
-      where: { userId: ctx.userId },
+      where: { userId: ctx.userId! },
     });
 
     if (!connection) {
@@ -74,7 +74,7 @@ export const connectedProcedure = protectedProcedure.use(
     const threadsClient = new ThreadsApiClient(accessToken);
 
     return next({
-      ctx: { ...ctx, connection, threadsClient },
+      ctx: { connection, threadsClient },
     });
   }),
 );

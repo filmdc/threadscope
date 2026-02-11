@@ -43,7 +43,7 @@ router.get('/me', async (req: ApiKeyRequest, res: Response) => {
  */
 router.get('/post/:threadsMediaId', async (req: ApiKeyRequest, res: Response) => {
   try {
-    const { threadsMediaId } = req.params;
+    const threadsMediaId = String(req.params.threadsMediaId);
 
     // Check if it's the user's own post (full insights)
     const ownPost = await prisma.postInsight.findUnique({
@@ -114,7 +114,7 @@ router.post('/post/batch', async (req: ApiKeyRequest, res: Response) => {
 router.get('/creator/:username', async (req: ApiKeyRequest, res: Response) => {
   try {
     const creator = await prisma.creator.findFirst({
-      where: { username: req.params.username },
+      where: { username: String(req.params.username) },
       select: {
         id: true,
         username: true,
@@ -148,7 +148,7 @@ router.get('/creator/:username', async (req: ApiKeyRequest, res: Response) => {
  */
 router.get('/keyword/:keyword/trend', async (req: ApiKeyRequest, res: Response) => {
   try {
-    const { keyword } = req.params;
+    const keyword = String(req.params.keyword);
 
     const tracked = await prisma.trackedKeyword.findFirst({
       where: { userId: req.userId!, keyword, isActive: true },
